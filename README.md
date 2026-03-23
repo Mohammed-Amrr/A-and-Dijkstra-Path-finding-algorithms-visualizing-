@@ -41,28 +41,28 @@ Depends on heuristic function (Manhattan distance) to search in the direction of
 
 ## Controls
 
- KEY -> Action
- 
- Left click -> Place start node (first click), end node (second click)
- Left click + drag -> Draw walls 
- Right click -> Erase a node 
- `SPACE` -> Run A* 
- `D` -> Run Dijkstra 
- `M` -> Generate random maze (requires start and end placed first) |
- `C` -> Clear the grid |
+| Key | Action |
+|-----|--------|
+| Left click | Place start node (first click), end node (second click), then draw walls |
+| Left click + drag | Draw walls |
+| Right click | Erase a node |
+| `SPACE` | Run A* |
+| `D` | Run Dijkstra |
+| `M` | Generate random maze (requires start and end placed first) |
+| `C` | Clear the grid |
 
 ---
 
 ## Color Reference
 
-COLOR -> MEANING
-
-GREEN → Start node
-RED → End node
-BLACK → Wall
-ORANGE → Open set — currently being evaluated
-BLUE → Closed set — already evaluated
-PURPLE → Final shortest path
+| Color | Meaning |
+|-------|---------|
+| Green | Start node |
+| Red | End node |
+| Black | Wall |
+| Orange | Open set — currently being evaluated |
+| Blue | Closed set — already evaluated |
+| Purple | Final shortest path |
 
 
 ---
