@@ -1,0 +1,403 @@
+import pygame
+import random
+from queue import PriorityQueue
+
+# ─────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────
+
+WIDTH = 800          # window width and height in pixels
+ROWS = 40            # number of rows and columns in the grid
+                     # each cell = 800 // 40 = 20px
+
+WIN = pygame.display.set_mode((WIDTH, WIDTH + 40))  # extra 40px for UI bar at bottom
+pygame.display.set_caption("Pathfinding Visualizer")
+
+# ─────────────────────────────────────────────
+# COLOURS (RGB)
+# ─────────────────────────────────────────────
+
+WHITE  = (255, 255, 255)  # unvisited cell
+BLACK  = (0,   0,   0  )  # wall
+RED    = (255, 0,   0  )  # end node
+GREEN  = (0,   255, 0  )  # start node
+BLUE   = (0,   0,   255)  # closed set — already fully evaluated
+ORANGE = (255, 165, 0  )  # open set — discovered, queued for evaluation
+PURPLE = (128, 0,   128)  # final shortest path
+GREY   = (128, 128, 128)  # grid lines
+DARK   = (30,  30,  30 )  # UI bar background
+
+# ─────────────────────────────────────────────
+# NODE CLASS
+# each cell in the grid is a Node object
+# ─────────────────────────────────────────────
+
+class Node:
+    def __init__(self, row, col, width, total_rows):
+        self.row = row              # grid position (row index)
+        self.col = col              # grid position (col index)
+        self.x = row * width        # pixel x position for drawing
+        self.y = col * width        # pixel y position for drawing
+        self.colour = WHITE         # default state is unvisited
+        self.neighbours = []        # list of adjacent non-wall nodes
+        self.width = width          # pixel size of this cell
+        self.total_rows = total_rows
+
+    def get_pos(self):
+        # returns grid coordinates (not pixel coordinates)
+        return self.row, self.col
+
+    # ── state checks ──
+    # colour IS the state — no separate variable needed
+    def is_closed(self):   return self.colour == BLUE
+    def is_open(self):     return self.colour == ORANGE
+    def is_wall(self):     return self.colour == BLACK
+    def is_start(self):    return self.colour == GREEN
+    def is_end(self):      return self.colour == RED
+
+    # ── state setters ──
+    def reset(self):       self.colour = WHITE
+    def make_closed(self): self.colour = BLUE
+    def make_open(self):   self.colour = ORANGE
+    def make_wall(self):   self.colour = BLACK
+    def make_start(self):  self.colour = GREEN
+    def make_end(self):    self.colour = RED
+    def make_path(self):   self.colour = PURPLE
+
+    def draw(self, win):
+        # draw this cell as a filled rectangle at its pixel position
+        pygame.draw.rect(win, self.colour,
+                         (self.x, self.y, self.width, self.width))
+
+    def update_neighbours(self, grid):
+        # check all 4 directions and add valid (non-wall) neighbours
+        # called once before running an algorithm so the list is current
+        self.neighbours = []
+
+        # down — check we're not on the last row
+        if self.row < self.total_rows - 1 and not grid[self.row + 1][self.col].is_wall():
+            self.neighbours.append(grid[self.row + 1][self.col])
+
+        # up — check we're not on the first row
+        if self.row > 0 and not grid[self.row - 1][self.col].is_wall():
+            self.neighbours.append(grid[self.row - 1][self.col])
+
+        # right — check we're not on the last column
+        if self.col < self.total_rows - 1 and not grid[self.row][self.col + 1].is_wall():
+            self.neighbours.append(grid[self.row][self.col + 1])
+
+        # left — check we're not on the first column
+        if self.col > 0 and not grid[self.row][self.col - 1].is_wall():
+            self.neighbours.append(grid[self.row][self.col - 1])
+
+# ─────────────────────────────────────────────
+# GRID FUNCTIONS
+# ─────────────────────────────────────────────
+
+def make_grid(rows, width):
+    grid = []
+    gap = width // rows   # pixel size of each cell (800 // 40 = 20)
+    for i in range(rows):
+        grid.append([])
+        for j in range(rows):
+            # create a node for every cell in the 2D grid
+            node = Node(i, j, gap, rows)
+            grid[i].append(node)
+    return grid
+
+def draw_grid(win, rows, width):
+    # draw grey lines between cells — purely visual
+    gap = width // rows
+    for i in range(rows):
+        # horizontal line for each row
+        pygame.draw.line(win, GREY, (0, i * gap), (width, i * gap))
+        for j in range(rows):
+            # vertical line for each column
+            pygame.draw.line(win, GREY, (j * gap, 0), (j * gap, width))
+
+def draw(win, grid, rows, width, status):
+    win.fill(WHITE)  # clear screen each frame
+
+    # draw every node (cell) in the grid
+    for row in grid:
+        for node in row:
+            node.draw(win)
+
+    # draw grid lines on top of the cells
+    draw_grid(win, rows, width)
+
+    # ── UI bar at the bottom ──
+    pygame.draw.rect(win, DARK, (0, width, width, 40))
+    font = pygame.font.SysFont("consolas", 14)
+    controls = font.render(
+        "SPACE: A*   |   D: Dijkstra   |   M: Random Maze   |   C: Clear    |   Status: " + status,
+        True, WHITE
+    )
+    win.blit(controls, (10, width + 10))  # blit = paste text onto the window
+
+    pygame.display.update()  # push everything to the screen
+
+def get_clicked_pos(pos, rows, width):
+    # convert mouse pixel position to grid row/col
+    gap = width // rows
+    y, x = pos          # pygame returns (x, y) but grid is [row][col] = [y][x]
+    if y >= width:
+        return None, None   # click was in the UI bar — ignore it
+    row = y // gap      # which row? divide pixel y by cell size
+    col = x // gap      # which col? divide pixel x by cell size
+    return row, col
+
+# ─────────────────────────────────────────────
+# MAZE GENERATOR
+# randomly places walls across the grid
+# ─────────────────────────────────────────────
+
+def generate_maze(grid, start, end, rows):
+    for row in grid:
+        for node in row:
+            if node != start and node != end:
+                # each cell has a 33% chance of becoming a wall
+                if random.random() < 0.33:
+                    node.make_wall()
+
+# ─────────────────────────────────────────────
+# PATH RECONSTRUCTION
+# traces the shortest path backwards from end to start
+# ─────────────────────────────────────────────
+
+def reconstruct_path(came_from, current, draw_fn):
+    # came_from[node] = the node we came from to reach this node
+    # keep looking up the parent until we reach the start (not in came_from)
+    while current in came_from:
+        current = came_from[current]
+        current.make_path()   # colour it purple
+        draw_fn()             # redraw so we see the path being drawn step by step
+
+# ─────────────────────────────────────────────
+# HEURISTIC — Manhattan Distance
+# estimates the remaining distance from a node to the end
+# used only by A* — Dijkstra doesn't use a heuristic
+# ─────────────────────────────────────────────
+
+def heuristic(p1, p2):
+    x1, y1 = p1
+    x2, y2 = p2
+    # Manhattan distance = horizontal steps + vertical steps
+    # correct for a grid where you can only move in 4 directions
+    return abs(x1 - x2) + abs(y1 - y2)
+
+# ─────────────────────────────────────────────
+# A* ALGORITHM
+# uses g_score (distance from start) + heuristic (estimate to end)
+# always processes the node with the lowest f_score = g + h
+# ─────────────────────────────────────────────
+
+def astar(draw_fn, grid, start, end):
+    count = 0   # tiebreaker when two nodes have the same f_score
+
+    # priority queue ordered by f_score — lowest f_score processed first
+    open_set = PriorityQueue()
+    open_set.put((0, count, start))
+
+    # came_from[node] = which node we came from to reach this node
+    came_from = {}
+
+    # g_score = actual distance from start to each node
+    # initialise all to infinity — "not yet reached"
+    g_score = {node: float("inf") for row in grid for node in row}
+    g_score[start] = 0   # distance from start to itself is 0
+
+    # f_score = g_score + heuristic = estimated total cost through this node
+    f_score = {node: float("inf") for row in grid for node in row}
+    f_score[start] = heuristic(start.get_pos(), end.get_pos())
+
+    # set for O(1) membership checks — faster than searching the queue
+    open_set_hash = {start}
+
+    while not open_set.empty():
+        # allow quitting during the algorithm
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+
+        # get the node with the lowest f_score
+        current = open_set.get()[2]
+        open_set_hash.discard(current)
+
+        # reached the end — reconstruct and draw the path
+        if current == end:
+            reconstruct_path(came_from, end, draw_fn)
+            end.make_end()      # restore end node colour (path overwrites it)
+            start.make_start()  # restore start node colour
+            return True
+
+        for neighbour in current.neighbours:
+            # cost to reach this neighbour through current node
+            # all edges cost 1 (unweighted grid)
+            temp_g = g_score[current] + 1
+
+            # found a better path to this neighbour
+            if temp_g < g_score[neighbour]:
+                came_from[neighbour] = current
+                g_score[neighbour] = temp_g
+                f_score[neighbour] = temp_g + heuristic(neighbour.get_pos(), end.get_pos())
+
+                if neighbour not in open_set_hash:
+                    count += 1
+                    open_set.put((f_score[neighbour], count, neighbour))
+                    open_set_hash.add(neighbour)
+                    neighbour.make_open()   # colour orange — queued for evaluation
+
+        draw_fn()   # redraw screen after processing each node — this IS the visualisation
+
+        if current != start:
+            current.make_closed()   # colour blue — fully evaluated, won't be revisited
+
+    return False   # queue empty, end never reached — no path exists
+
+# ─────────────────────────────────────────────
+# DIJKSTRA'S ALGORITHM
+# same structure as A* but NO heuristic
+# ordered purely by distance from start
+# explores all directions equally — slower but still finds shortest path
+# ─────────────────────────────────────────────
+
+def dijkstra(draw_fn, grid, start, end):
+    count = 0
+
+    # priority queue ordered by distance from start
+    open_set = PriorityQueue()
+    open_set.put((0, count, start))
+
+    came_from = {}
+
+    # dist = known shortest distance from start to each node
+    dist = {node: float("inf") for row in grid for node in row}
+    dist[start] = 0
+
+    open_set_hash = {start}
+
+    while not open_set.empty():
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+
+        # get node with smallest known distance from start
+        current = open_set.get()[2]
+        open_set_hash.discard(current)
+
+        if current == end:
+            reconstruct_path(came_from, end, draw_fn)
+            end.make_end()
+            start.make_start()
+            return True
+
+        for neighbour in current.neighbours:
+            temp_dist = dist[current] + 1   # all edges cost 1
+
+            # found a shorter path to this neighbour
+            if temp_dist < dist[neighbour]:
+                came_from[neighbour] = current
+                dist[neighbour] = temp_dist
+
+                if neighbour not in open_set_hash:
+                    count += 1
+                    # no heuristic — ordered by distance only
+                    open_set.put((dist[neighbour], count, neighbour))
+                    open_set_hash.add(neighbour)
+                    neighbour.make_open()
+
+        draw_fn()   # redraw after each node — visualises the expanding wave
+
+        if current != start:
+            current.make_closed()
+
+    return False
+
+# ─────────────────────────────────────────────
+# MAIN LOOP
+# handles events, input, and triggers algorithms
+# ─────────────────────────────────────────────
+
+def main(win, width):
+    grid = make_grid(ROWS, width)
+    start = None
+    end = None
+    running = True
+    status = "Ready"
+
+    while running:
+        draw(win, grid, ROWS, width, status)
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            # ── LEFT CLICK — place start, end, or wall ──
+            if pygame.mouse.get_pressed()[0]:
+                pos = pygame.mouse.get_pos()
+                row, col = get_clicked_pos(pos, ROWS, width)
+                if row is None:
+                    continue   # clicked the UI bar, ignore
+                node = grid[row][col]
+
+                if not start and node != end:
+                    start = node
+                    start.make_start()   # first click = green start node
+
+                elif not end and node != start:
+                    end = node
+                    end.make_end()       # second click = red end node
+
+                elif node != end and node != start:
+                    node.make_wall()     # all other clicks = black wall
+
+            # ── RIGHT CLICK — erase any node ──
+            elif pygame.mouse.get_pressed()[2]:
+                pos = pygame.mouse.get_pos()
+                row, col = get_clicked_pos(pos, ROWS, width)
+                if row is None:
+                    continue
+                node = grid[row][col]
+                node.reset()
+                if node == start: start = None
+                if node == end:   end = None
+
+            if event.type == pygame.KEYDOWN:
+
+                # SPACE — run A*
+                if event.key == pygame.K_SPACE and start and end:
+                    for row in grid:
+                        for node in row:
+                            node.update_neighbours(grid)   # rebuild neighbour lists
+                    status = "Running A*..."
+                    draw(win, grid, ROWS, width, status)
+                    found = astar(lambda: draw(win, grid, ROWS, width, status), grid, start, end)
+                    status = "A* — Path found!" if found else "A* — No path exists"
+
+                # D — run Dijkstra
+                if event.key == pygame.K_d and start and end:
+                    for row in grid:
+                        for node in row:
+                            node.update_neighbours(grid)
+                    status = "Running Dijkstra..."
+                    draw(win, grid, ROWS, width, status)
+                    found = dijkstra(lambda: draw(win, grid, ROWS, width, status), grid, start, end)
+                    status = "Dijkstra — Path found!" if found else "Dijkstra — No path exists"
+
+                # M — generate random maze
+                if event.key == pygame.K_m and start and end:
+                    generate_maze(grid, start, end, ROWS)
+                    status = "Maze generated — press SPACE or D"
+
+                # C — clear everything and reset
+                if event.key == pygame.K_c:
+                    start = None
+                    end = None
+                    grid = make_grid(ROWS, width)
+                    status = "Ready"
+
+    pygame.quit()
+
+pygame.init()
+main(WIN, WIDTH)
