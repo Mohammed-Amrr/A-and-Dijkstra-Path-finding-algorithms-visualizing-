@@ -54,6 +54,7 @@ class Node:
     def is_wall(self):     return self.colour == BLACK
     def is_start(self):    return self.colour == GREEN
     def is_end(self):      return self.colour == RED
+    def is_path(self):     return self.colour == PURPLE
 
     # ── state setters ──
     def reset(self):       self.colour = WHITE
@@ -146,6 +147,21 @@ def get_clicked_pos(pos, rows, width):
     row = y // gap      # which row? divide pixel y by cell size
     col = x // gap      # which col? divide pixel x by cell size
     return row, col
+
+# ─────────────────────────────────────────────
+# PATH CLEAR
+# resets only algorithm-coloured nodes (open, closed, path)
+# walls, start, and end are preserved
+# ─────────────────────────────────────────────
+
+def clear_path(grid, start, end):
+    for row in grid:
+        for node in row:
+            if node.is_closed() or node.is_open() or node.is_path():
+                node.reset()
+    # restore start and end in case path reconstruction overwrote them
+    start.make_start()
+    end.make_end()
 
 # ─────────────────────────────────────────────
 # MAZE GENERATOR
@@ -367,9 +383,10 @@ def main(win, width):
 
                 # SPACE — run A*
                 if event.key == pygame.K_SPACE and start and end:
+                    clear_path(grid, start, end)   # reset previous algorithm result
                     for row in grid:
                         for node in row:
-                            node.update_neighbours(grid)   # rebuild neighbour lists
+                            node.update_neighbours(grid)
                     status = "Running A*..."
                     draw(win, grid, ROWS, width, status)
                     found = astar(lambda: draw(win, grid, ROWS, width, status), grid, start, end)
@@ -377,6 +394,7 @@ def main(win, width):
 
                 # D — run Dijkstra
                 if event.key == pygame.K_d and start and end:
+                    clear_path(grid, start, end)   # reset previous algorithm result
                     for row in grid:
                         for node in row:
                             node.update_neighbours(grid)
