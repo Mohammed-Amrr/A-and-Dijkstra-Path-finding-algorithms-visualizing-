@@ -9,7 +9,7 @@ An interactive visualizer for A* and Dijkstra's pathfinding algorithms, built wi
 
 ## Demo
 
-[Pathfinding_visualizer](https://github.com/user-attachments/assets/6133643c-cebe-42b1-8536-d45910e04029)
+![Pathfinding_visualizer](https://github.com/user-attachments/assets/6133643c-cebe-42b1-8536-d45910e04029)
 
 
 ---
