@@ -40,6 +40,20 @@ Depends on heuristic function (Manhattan distance) to search in the direction of
 
 ---
 
+## Instructions
+
+- Install Python (tested with versions 3.12 and 3.13).
+- Install dependencies:
+  pip install pygame (crucial) 
+
+- Clone or download the repository.
+- Run the program:
+  Pathfinding.py
+
+- A bar at the bottom of the window displays controls and the current process (e.g., running Dijkstra, path found).
+
+---
+
 ## Controls
 
 | Key | Action |
